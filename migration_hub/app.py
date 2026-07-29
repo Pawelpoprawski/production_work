@@ -46,10 +46,12 @@ def home() -> None:
             "Category": w.category,
             "Last run": last["started"] if last else "—",
             "Last period": (last.get("params") or {}).get("period", "—") if last else "—",
-            "Result": ("✅" if last["status"] == "ok" else "❌") if last else "—",
+            "Run time [min]": (round(last["duration_s"] / 60, 1)
+                               if last and last.get("duration_s") is not None else None),
+            "Result": ("✅" if last.get("status") == "ok" else "❌") if last else "—",
             "Description": w.description.splitlines()[0] if w.description else "",
         })
-    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
     st.markdown("Pick a workflow from the menu on the left to see its "
                 "instructions and start a run.")

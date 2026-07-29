@@ -129,7 +129,7 @@ def settings_page(workflows: list[Workflow]) -> None:
         table = pd.DataFrame([
             {"Name": name, "Path": overrides.get(name, str(path))}
             for name, path in defaults.items()])
-        edited = st.data_editor(table, hide_index=True, use_container_width=True,
+        edited = st.data_editor(table, hide_index=True, width="stretch",
                                 disabled=["Name"], key=key)
         return {name: path.strip()
                 for name, path in zip(edited["Name"], edited["Path"])
@@ -212,11 +212,22 @@ def _inputs_section(wf: Workflow, params: dict) -> bool:
             "File": path.name,
             "Path": str(path.parent),
         })
-    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
     if not all_ok:
         missing = sum(r["Status"].startswith("❌") for r in rows)
         st.warning(f"{missing} of {len(rows)} input files are missing.")
     return all_ok
+
+
+def _save_description(wf: Workflow, text: str) -> None:
+    """Persist an edited description back to the workflow's meta.yaml."""
+    import yaml
+    meta_file = wf.path / "meta.yaml"
+    meta = yaml.safe_load(meta_file.read_text(encoding="utf-8")) or {}
+    meta["description"] = text
+    meta_file.write_text(yaml.safe_dump(meta, allow_unicode=True, sort_keys=False),
+                         encoding="utf-8")
+    wf.description = text
 
 
 def workflow_page(wf: Workflow) -> None:
@@ -226,6 +237,13 @@ def workflow_page(wf: Workflow) -> None:
                + (f" · owner: {wf.owner}" if wf.owner else ""))
     if wf.description:
         st.markdown(wf.description)
+    with st.expander("✏️ Edit description", expanded=False):
+        new_desc = st.text_area("Description (markdown)", value=wf.description,
+                                height=120, key=f"desc_{wf.key}")
+        if st.button("💾 Save description", key=f"desc_save_{wf.key}"):
+            _save_description(wf, new_desc)
+            st.success("Saved.")
+            st.rerun()
 
     if wf.instructions:
         with st.expander("📖 Instructions", expanded=False):
@@ -280,9 +298,10 @@ def workflow_page(wf: Workflow) -> None:
     if history:
         st.subheader("Recent runs")
         st.dataframe(pd.DataFrame([
-            {"Date": h["started"], "Status": "✅" if h["status"] == "ok" else "❌",
+            {"Date": h.get("started", "—"),
+             "Status": "✅" if h.get("status") == "ok" else "❌",
              "Duration [s]": h.get("duration_s"), "Parameters": str(h.get("params"))}
             for h in history
-        ]), hide_index=True, use_container_width=True)
+        ]), hide_index=True, width="stretch")
 
     logs_section(prefix=wf.key, key_ns=wf.key)
