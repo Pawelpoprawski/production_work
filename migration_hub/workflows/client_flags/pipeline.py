@@ -77,7 +77,8 @@ class Config:
                 flagging / "04 - IB Access" / "DAC Clients - 12554532.csv",
                 ",", "latin-1"),
             "pma_ch": (pma_dir / "H1_PMA_CH.csv", ",", "latin-1"),
-            "pma_apac": (pma_dir / "H1 - PMA_Mandates_APAC.csv", ",", "utf-8-sig"),
+            # note: the file name really has TWO spaces after "H1 -" on the share
+            "pma_apac": (pma_dir / "H1 -  PMA_Mandates_APAC.csv", ",", "utf-8-sig"),
             "gmis_mandates": (
                 gfo / "005_Projects" / "004_Python" / "Alteryx" / "Database"
                 / "temps" / "GMIS Mandates per account.csv", "|", "utf-8-sig"),
