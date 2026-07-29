@@ -1,0 +1,38 @@
+name: Client Flags
+category: Flags
+status: ready
+owner: Pawel Poprawski
+description: >
+  Client flagging (rewritten from the Alteryx flagging workflow). Builds
+  per-relation flags — DAC (IB Access file + GMIS DAC mandates), PMA CH
+  document flags (PCS / CMS / RS schedules) and PMA APAC mandates — and
+  writes table_flags_<year>.csv.
+instructions: |
+  ## How to run
+  1. Make sure the monthly source files are on the share for the selected
+     period (DAC Clients, H1_PMA_CH, H1 - PMA_Mandates_APAC,
+     2655 Account Replacement).
+  2. Pick the period (YYYYMM) and click **Start**.
+
+  ## Logic (as in Alteryx)
+  * **Base**: `2655 Account Replacement.csv` — maps `PARTNER_ID_1` to
+    `Relation_ID` (`R_IDENTIFIER`).
+  * **DAC branch**: `DAC Clients - 12554532.csv` — `DAC_FLAG = Y` when any of
+    the 11 Direct-Access flag columns equals 1; unioned with GMIS DAC mandates
+    (mandate list joined to `GMIS Mandates per account.csv`, Coverage Cluster
+    = DAC). Final `flag_DAC_FLAG = Y` if either source says Y.
+  * **PMA CH branch**: `H1_PMA_CH.csv` — key `3032-` + Business Relation,
+    CDOK in (66661, 66668, 66669, 66675, 66676, 66677, 66678) and Status in
+    (10, 20, 34); documents cross-tabbed per CDOK, then PMS / CMS / RS /
+    PMA_STATUS and PCS / schedule flags derived.
+  * **PMA APAC branch**: `H1 - PMA_Mandates_APAC.csv` — Bc in (4005, 4006)
+    → PMA Capital Market Schedule = Y.
+  * Branches are unioned by name and aggregated with max() per Relation_ID.
+
+  ## Output
+  * `table_flags_<year>.csv` (pipe-delimited, CRLF, UTF-8 BOM) — one row per
+    relation with all `flag_*` columns.
+params:
+  - key: period
+    label: Period (YYYYMM)
+    type: period

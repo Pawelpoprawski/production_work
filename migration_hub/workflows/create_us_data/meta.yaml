@@ -1,0 +1,28 @@
+name: Create US Data
+category: US Dashboard
+status: ready
+owner: Pawel Poprawski
+description: >
+  GWM Dashboard US — monthly pipeline rewritten from the Alteryx workflow.
+  Combines RAS Full Population, GFO Manual adjustments, Banker Portal and DIG
+  data into df_monthly_us_fin.csv / df_monthly_us_qv.csv + a control file.
+instructions: |
+  ## How to run
+  1. Make sure the input files for the given month are on the share
+     (Strategic Clients, Manual adjustments, Masterlist, RAS CSV).
+  2. Pick the reporting period (YYYYMM) — the current one is preselected.
+  3. Click **Start** — progress is shown in the live log.
+
+  ## Outputs
+  * `df_monthly_us_fin.csv` — financial data (union of ADW / Manual Adj / BP / DIG branches)
+  * `df_monthly_us_qv.csv` — US client list (QV)
+  * `control_check_<PERIOD>.csv` — control sums by GFIW lvl 1/2 × Period
+
+  ## Local testing
+  Set the `UBS_DATA_ROOT` / `UBS_OUTPUT_DIR` environment variables to a
+  directory with sample data (see `create_sample_data.py` in the repo).
+params:
+  - key: period
+    label: Period (YYYYMM)
+    type: period
+    help: Defaults to the period derived from today minus 10 days; ±3 periods to choose from.

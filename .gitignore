@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+logs/
+output/
+migration_hub/logs/
+migration_hub/settings.yaml
+
+# Alteryx exports and legacy single-app files - local only, not pushed
+xml.txt
+flagging.txt
+workflow_clean.xml
+/app.py
+/pipeline.py
+/config.py
+/create_sample_data.py
+sample_data/
