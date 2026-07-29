@@ -14,3 +14,6 @@ workflow_clean.xml
 /config.py
 /create_sample_data.py
 sample_data/
+.venv/
+bat_test.log
+migration_hub/bat_test.log
