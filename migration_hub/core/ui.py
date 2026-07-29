@@ -26,22 +26,6 @@ STATUS_BADGE = {
 }
 
 
-def _wide_kwargs() -> dict:
-    """Full-width kwargs for st.dataframe/st.data_editor across Streamlit
-    versions: width="stretch" exists only since 1.46, use_container_width
-    was removed after 2025 — pick whichever this installation supports."""
-    try:
-        major, minor = (int(x) for x in st.__version__.split(".")[:2])
-    except ValueError:
-        return {}
-    if (major, minor) >= (1, 46):
-        return {"width": "stretch"}
-    return {"use_container_width": True}
-
-
-WIDE = _wide_kwargs()
-
-
 def _period_options(p: dict) -> tuple[list[str], int]:
     """YYYYMM periods around the 'current' period (today minus offset_days).
 
@@ -145,7 +129,7 @@ def settings_page(workflows: list[Workflow]) -> None:
         table = pd.DataFrame([
             {"Name": name, "Path": overrides.get(name, str(path))}
             for name, path in defaults.items()])
-        edited = st.data_editor(table, hide_index=True, **WIDE,
+        edited = st.data_editor(table, hide_index=True,
                                 disabled=["Name"], key=key)
         return {name: path.strip()
                 for name, path in zip(edited["Name"], edited["Path"])
@@ -228,7 +212,7 @@ def _inputs_section(wf: Workflow, params: dict) -> bool:
             "File": path.name,
             "Path": str(path.parent),
         })
-    st.dataframe(pd.DataFrame(rows), hide_index=True, **WIDE)
+    st.dataframe(pd.DataFrame(rows), hide_index=True)
     if not all_ok:
         missing = sum(r["Status"].startswith("❌") for r in rows)
         st.warning(f"{missing} of {len(rows)} input files are missing.")
@@ -318,6 +302,6 @@ def workflow_page(wf: Workflow) -> None:
              "Status": "✅" if h.get("status") == "ok" else "❌",
              "Duration [s]": h.get("duration_s"), "Parameters": str(h.get("params"))}
             for h in history
-        ]), hide_index=True, **WIDE)
+        ]), hide_index=True)
 
     logs_section(prefix=wf.key, key_ns=wf.key)

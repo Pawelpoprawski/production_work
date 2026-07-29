@@ -12,7 +12,7 @@ import streamlit as st
 from core import registry
 from core import settings as hub_settings
 from core.runner import read_history
-from core.ui import WIDE, logs_section, settings_page, workflow_page
+from core.ui import logs_section, settings_page, workflow_page
 
 st.set_page_config(page_title="Production Cockpit", page_icon="🚀", layout="wide")
 
@@ -51,7 +51,7 @@ def home() -> None:
             "Result": ("✅" if last.get("status") == "ok" else "❌") if last else "—",
             "Description": w.description.splitlines()[0] if w.description else "",
         })
-    st.dataframe(pd.DataFrame(rows), hide_index=True, **WIDE)
+    st.dataframe(pd.DataFrame(rows), hide_index=True)
 
     st.markdown("Pick a workflow from the menu on the left to see its "
                 "instructions and start a run.")
