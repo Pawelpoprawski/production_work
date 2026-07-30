@@ -97,11 +97,30 @@ def get_outputs(params: dict) -> dict:
 # ---------------------------------------------------------------- helpers
 def col(df: pd.DataFrame, name: str) -> str:
     def norm(s: str) -> str:
-        return " ".join(str(s).replace("\xa0", " ").split()).lower()
+        s = str(s).replace("﻿", "").replace("ï»¿", "")  # stray UTF-8 BOM
+        s = s.strip().strip('"').strip("'")
+        return " ".join(s.replace("\xa0", " ").split()).lower()
     for c in df.columns:
         if norm(c) == norm(name):
             return c
     raise KeyError(f"Missing column '{name}'. Available: {list(df.columns)}")
+
+
+def read_csv_robust(path, sep: str, declared_encoding: str) -> pd.DataFrame:
+    """Read a CSV the way Alteryx effectively does: honour a UTF-8 BOM even
+    when the declared code page says otherwise, handle double quotes, and
+    strip stray quotes left in headers/values."""
+    with open(path, "rb") as f:
+        has_bom = f.read(3) == b"\xef\xbb\xbf"
+    enc = "utf-8-sig" if has_bom else declared_encoding
+    df = pd.read_csv(path, sep=sep, dtype=str, encoding=enc,
+                     keep_default_na=False, na_values=[""])
+    df.columns = [str(c).replace("﻿", "").replace("ï»¿", "")
+                  .strip().strip('"').strip() for c in df.columns]
+    for c in df.select_dtypes(include="object").columns:
+        df[c] = df[c].str.strip().str.strip('"')
+    log.info("Loaded %s: %s rows (encoding %s)", Path(path).name, len(df), enc)
+    return df
 
 
 def uniq(series: pd.Series) -> pd.Series:
@@ -123,16 +142,16 @@ def run(params: dict, progress=print) -> dict:
     rel_hec = uniq(hec[col(hec, "R_IDENTIFIER")])
     log.info("HEC: %s rows -> %s unique relations", len(hec), len(rel_hec))
 
-    rs = pd.read_csv(cfg.inputs["relation_structure"], sep="|", dtype=str,
-                     encoding="latin-1", keep_default_na=False, na_values=[""])
+    rs = read_csv_robust(cfg.inputs["relation_structure"], sep="|",
+                         declared_encoding="latin-1")
     before = len(rs)
     rs = rs[rs[col(rs, "GFIW_SECTOR_FLAG")] == "Y"]
     log.info("Relation Structure: GFIW_SECTOR_FLAG=Y filter: %s kept, %s dropped",
              len(rs), before - len(rs))
     rel_rs = uniq(rs[col(rs, "RELATION_ID")])
 
-    rr = pd.read_csv(cfg.inputs["relation_replacement"], sep=",", dtype=str,
-                     encoding="latin-1", keep_default_na=False, na_values=[""])
+    rr = read_csv_robust(cfg.inputs["relation_replacement"], sep=",",
+                         declared_encoding="latin-1")
     ia = pd.to_numeric(rr[col(rr, "INVESTED_ASSET_MTD")], errors="coerce")
     rev_ytd = pd.to_numeric(rr[col(rr, "NET_REVENUE_YTD")], errors="coerce")
     rev_prev = pd.to_numeric(rr[col(rr, "NET_REVENUE_DECYTD_T_1")], errors="coerce")
@@ -151,8 +170,8 @@ def run(params: dict, progress=print) -> dict:
              len(relations), len(rel_evc), len(rel_hec), len(rel_rs), len(rel_rr))
 
     # ------------------------------------- relations -> GMIS accounts
-    acc = pd.read_csv(cfg.inputs["accounts_relation"], sep="|", dtype=str,
-                      encoding="latin-1", keep_default_na=False, na_values=[""])
+    acc = read_csv_robust(cfg.inputs["accounts_relation"], sep="|",
+                          declared_encoding="latin-1")
     before = len(acc)
     acc = acc[acc[col(acc, "ACCOUNT_TYPE")] == "GMIS"]
     log.info("Accounts_Relation: ACCOUNT_TYPE=GMIS filter: %s kept, %s dropped",
