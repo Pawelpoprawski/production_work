@@ -224,11 +224,21 @@ def run(params: dict, progress=print) -> dict:
 
     for i, path in enumerate(files, 1):
         file_rows = file_kept = 0
+        size_mb = path.stat().st_size / 1024 / 1024
+        log.info("Opening file %s/%s: %s (%.1f MB)", i, len(files), path.name, size_mb)
+        est_total = None  # estimated row count, derived from the first chunk
         reader = pd.read_csv(path, sep="\t", dtype=str, encoding="utf-8-sig",
                              keep_default_na=False, na_values=[""],
                              chunksize=CHUNK_ROWS)
         for chunk in reader:
             file_rows += len(chunk)
+            if est_total is None:
+                sample = chunk.head(1000)
+                bytes_per_row = max(
+                    len(sample.to_csv(sep="\t", index=False).encode("utf-8"))
+                    / max(len(sample), 1), 1)
+                est_total = max(int(path.stat().st_size / bytes_per_row),
+                                len(chunk))
             chunk = clean_chunk(chunk)[ALL_COLS]
 
             # global Unique (23): drop rows already seen in ANY file
@@ -237,6 +247,9 @@ def run(params: dict, progress=print) -> dict:
             chunk = chunk[mask]
             file_kept += len(chunk)
             if not len(chunk):
+                log.info("  [%s] progress: ~%s%% — %s rows processed "
+                         "(chunk fully duplicated)", path.name,
+                         min(file_rows * 100 // est_total, 99), file_rows)
                 continue
 
             chunk["FileName"] = path.name
@@ -272,7 +285,11 @@ def run(params: dict, progress=print) -> dict:
                 chunk.groupby(HIER_COLS + ["Year (YYYY)"], as_index=False)
                      [MEASURE_COLS].sum())
 
-        log.info("File %s/%s: %s — %s rows read, %s kept, %s dropped as "
+            pct = min(file_rows * 100 // est_total, 99)
+            log.info("  [%s] progress: ~%s%% — %s rows processed, "
+                     "%s total in RAW so far", path.name, pct, file_rows, raw_rows)
+
+        log.info("File %s/%s done: %s — %s rows read, %s kept, %s dropped as "
                  "duplicates (global Unique)", i, len(files), path.name,
                  file_rows, file_kept, file_rows - file_kept)
 
