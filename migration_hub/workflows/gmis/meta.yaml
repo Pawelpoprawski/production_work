@@ -1,0 +1,30 @@
+name: GMIS
+category: GWM Figures
+status: ready
+owner: Pawel Poprawski
+description: >
+  Load GMIS to DB — consolidates ~100 GMIS export files (txt, ~1M rows each)
+  into the raw GWM database plus per-account groupings, and reconciles the
+  totals against the "GWM Grouped for Check" file downloaded from GMIS.
+instructions: |
+  ## How to run
+  1. Put the GMIS export files (`*.txt`) in the `GMIS DATA\All` folder and
+     the grouped download in `GMIS DATA\GWM Grouped for Check.txt`.
+  2. Click **Start** — files are processed one by one (streaming), progress
+     is shown in the live log.
+
+  ## Outputs (pipe-delimited CSV)
+  * `0. GWM RAW GMIS.csv` — consolidated raw GMIS data (deduplicated)
+  * `temps/Current GMIS grouping.csv` — unique grouping per account/month
+  * `temps/Brokerage per account.csv` — rows with Brokerage revenue sub type
+  * `temps/GMIS Mandates per account.csv` — mandate hierarchy per account (IA >= 1)
+  * `Compare1.csv` / `Compare2.csv` — reconciliation vs the grouped check file
+
+  ## Check
+  After the run the page shows a green check when the consolidated totals
+  match the "GWM Grouped for Check" file, or a warning with the differences.
+params:
+  - key: period
+    label: Period (YYYYMM)
+    type: period
+    help: Informational — GMIS paths do not depend on the period.
