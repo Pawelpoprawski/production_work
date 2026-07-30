@@ -84,6 +84,14 @@ MEASURE_COLS = [
 DIM_COLS = ID_COLS + HIER_COLS
 ALL_COLS = DIM_COLS + MEASURE_COLS  # dedup key = every data column (Unique 23)
 
+# quick total check reconciles only these key measures
+QUICK_MEASURES = [
+    "Net rev. aft. man. adj. incl. shift impact (CA50480)",
+    "Gross rev. aft. man. adj. incl. shift impact (CA10950)",
+    "Total assets  incl. shift impact (CA10035)",
+    "NNM after manual adj. (CA10505)",
+]
+
 
 class Config:
     def __init__(self):
@@ -209,11 +217,11 @@ def run_quick_check(cfg: Config) -> dict:
     if not files:
         raise FileNotFoundError(f"No *.txt GMIS files found in {src_dir}")
     log.info("QUICK CHECK: %s files — reading only Year + %s measures, "
-             "no dedup / no RAW output", len(files), len(MEASURE_COLS))
+             "no dedup / no RAW output", len(files), len(QUICK_MEASURES))
 
     def norm(s: str) -> str:
         return " ".join(s.replace("\xa0", " ").split()).lower()
-    wanted = {norm(c): c for c in ["Year (YYYY)"] + MEASURE_COLS}
+    wanted = {norm(c): c for c in ["Year (YYYY)"] + QUICK_MEASURES}
 
     run_start = time.monotonic()
     parts: list[pd.DataFrame] = []   # one small Year-grouped frame per file
@@ -228,15 +236,15 @@ def run_quick_check(cfg: Config) -> dict:
         for chunk in reader:
             rows += len(chunk)
             chunk = chunk.rename(columns={c: wanted[norm(c)] for c in chunk.columns})
-            for c in MEASURE_COLS:
+            for c in QUICK_MEASURES:
                 chunk[c] = pd.to_numeric(
                     chunk[c].astype(str).str.replace(",", "", regex=False),
                     errors="coerce")
             chunk["Year (YYYY)"] = chunk["Year (YYYY)"].astype(str).str.strip()
             file_parts.append(chunk.groupby("Year (YYYY)", as_index=False)
-                              [MEASURE_COLS].sum())
+                              [QUICK_MEASURES].sum())
         file_total = (pd.concat(file_parts, ignore_index=True)
-                      .groupby("Year (YYYY)", as_index=False)[MEASURE_COLS].sum())
+                      .groupby("Year (YYYY)", as_index=False)[QUICK_MEASURES].sum())
         parts.append(file_total)
         done_s = time.monotonic() - run_start
         log.info("QUICK CHECK: file %s/%s: %s — %s rows summed in %.1f s "
@@ -244,7 +252,7 @@ def run_quick_check(cfg: Config) -> dict:
                  time.monotonic() - file_start, (len(files) - i) * done_s / i / 60)
 
     consolidated = (pd.concat(parts, ignore_index=True)
-                    .groupby("Year (YYYY)", as_index=False)[MEASURE_COLS].sum())
+                    .groupby("Year (YYYY)", as_index=False)[QUICK_MEASURES].sum())
     consolidated["File"] = "Consolidated"
 
     chk = pd.read_csv(cfg.inputs["grouped_check"], sep="\t", dtype=str,
@@ -252,24 +260,24 @@ def run_quick_check(cfg: Config) -> dict:
                       na_values=[""], quoting=3)
     chk = chk.rename(columns={c: wanted[norm(c)] for c in chk.columns
                               if norm(c) in wanted})
-    for c in MEASURE_COLS:
+    for c in QUICK_MEASURES:
         chk[c] = pd.to_numeric(
             chk[c].astype(str).str.replace(",", "", regex=False), errors="coerce")
     chk["Year (YYYY)"] = chk["Year (YYYY)"].astype(str).str.strip()
-    chk = chk.groupby("Year (YYYY)", as_index=False)[MEASURE_COLS].sum()
+    chk = chk.groupby("Year (YYYY)", as_index=False)[QUICK_MEASURES].sum()
     chk["File"] = "Check"
     log.info("QUICK CHECK: grouped check loaded (%s years)", len(chk))
 
     compare = pd.concat([consolidated, chk], ignore_index=True)
-    compare[MEASURE_COLS] = compare[MEASURE_COLS].round(2)
+    compare[QUICK_MEASURES] = compare[QUICK_MEASURES].round(2)
     out = Path(cfg.outputs["compare2"]).with_name("Quick total check.csv")
     out.parent.mkdir(parents=True, exist_ok=True)
     compare.to_csv(out, sep=CSV_SEP, index=False, encoding=CSV_ENCODING,
                    lineterminator="\r\n")
     log.info("Saved %s (%s rows)", out, len(compare))
 
-    cons_t = compare[compare["File"] == "Consolidated"].set_index("Year (YYYY)")[MEASURE_COLS]
-    chk_t = compare[compare["File"] == "Check"].set_index("Year (YYYY)")[MEASURE_COLS]
+    cons_t = compare[compare["File"] == "Consolidated"].set_index("Year (YYYY)")[QUICK_MEASURES]
+    chk_t = compare[compare["File"] == "Check"].set_index("Year (YYYY)")[QUICK_MEASURES]
     diff = cons_t.sub(chk_t, fill_value=0).round(2)
     bad = diff.abs().gt(COMPARE_TOLERANCE)
     checks = []
@@ -278,7 +286,7 @@ def run_quick_check(cfg: Config) -> dict:
                  "Consolidated": round(float(cons_t.get(m, pd.Series()).get(y, 0)), 2),
                  "Check": round(float(chk_t.get(m, pd.Series()).get(y, 0)), 2),
                  "Diff": float(diff.loc[y, m])}
-                for y in diff.index for m in MEASURE_COLS if bad.loc[y, m]]
+                for y in diff.index for m in QUICK_MEASURES if bad.loc[y, m]]
         log.warning("QUICK CHECK: %s Year x Measure totals differ "
                     "(note: this mode does NOT deduplicate across files)", len(rows))
         checks.append({"name": "Quick total check", "status": "warning",
