@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from pathlib import Path
 
 import numpy as np
@@ -222,15 +223,25 @@ def run(params: dict, progress=print) -> dict:
     mandate_parts: list[pd.DataFrame] = []    # per-chunk partial groupbys (30)
     consolidated_parts: list[pd.DataFrame] = []  # per-chunk partial groupbys (10)
 
+    run_start = time.monotonic()
     for i, path in enumerate(files, 1):
         file_rows = file_kept = 0
+        file_start = time.monotonic()
         size_mb = path.stat().st_size / 1024 / 1024
         log.info("Opening file %s/%s: %s (%.1f MB)", i, len(files), path.name, size_mb)
+        log.info("  [%s] reading first chunk (%s rows) — a slow network share "
+                 "can make this take a while…", path.name, CHUNK_ROWS)
         est_total = None  # estimated row count, derived from the first chunk
+        chunk_no = 0
+        chunk_start = time.monotonic()
         reader = pd.read_csv(path, sep="\t", dtype=str, encoding="utf-8-sig",
                              keep_default_na=False, na_values=[""],
                              chunksize=CHUNK_ROWS)
         for chunk in reader:
+            chunk_no += 1
+            read_s = time.monotonic() - chunk_start
+            log.info("  [%s] chunk %s read: %s rows in %.1f s — cleaning…",
+                     path.name, chunk_no, len(chunk), read_s)
             file_rows += len(chunk)
             if est_total is None:
                 sample = chunk.head(1000)
@@ -247,9 +258,10 @@ def run(params: dict, progress=print) -> dict:
             chunk = chunk[mask]
             file_kept += len(chunk)
             if not len(chunk):
-                log.info("  [%s] progress: ~%s%% — %s rows processed "
-                         "(chunk fully duplicated)", path.name,
+                log.info("  [%s] chunk %s fully duplicated — ~%s%%, %s rows "
+                         "processed", path.name, chunk_no,
                          min(file_rows * 100 // est_total, 99), file_rows)
+                chunk_start = time.monotonic()
                 continue
 
             chunk["FileName"] = path.name
@@ -286,12 +298,22 @@ def run(params: dict, progress=print) -> dict:
                      [MEASURE_COLS].sum())
 
             pct = min(file_rows * 100 // est_total, 99)
-            log.info("  [%s] progress: ~%s%% — %s rows processed, "
-                     "%s total in RAW so far", path.name, pct, file_rows, raw_rows)
+            chunk_s = time.monotonic() - chunk_start
+            rate = int(len(chunk) / chunk_s) if chunk_s > 0 else 0
+            file_elapsed = time.monotonic() - file_start
+            eta_s = max(est_total - file_rows, 0) / max(file_rows / file_elapsed, 1)
+            log.info("  [%s] chunk %s done in %.1f s (%s rows/s) — file ~%s%%, "
+                     "ETA for this file ~%.0f s | %s rows in RAW so far",
+                     path.name, chunk_no, chunk_s, f"{rate:,}", pct, eta_s, raw_rows)
+            chunk_start = time.monotonic()
 
-        log.info("File %s/%s done: %s — %s rows read, %s kept, %s dropped as "
-                 "duplicates (global Unique)", i, len(files), path.name,
-                 file_rows, file_kept, file_rows - file_kept)
+        file_s = time.monotonic() - file_start
+        done_s = time.monotonic() - run_start
+        eta_all = (len(files) - i) * done_s / i
+        log.info("File %s/%s done in %.0f s: %s — %s rows read, %s kept, %s "
+                 "dropped as duplicates (global Unique) | overall ETA ~%.0f min",
+                 i, len(files), file_s, path.name, file_rows, file_kept,
+                 file_rows - file_kept, eta_all / 60)
 
     log.info("RAW: %s unique rows written to %s (from %s files)",
              raw_rows, cfg.outputs["raw"], len(files))
