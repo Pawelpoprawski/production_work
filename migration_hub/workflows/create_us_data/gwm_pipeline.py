@@ -202,6 +202,8 @@ def build_adw_branch(us_client_ids: pd.Series) -> pd.DataFrame:
     pm["_k"] = pm["Key"].str.upper().str.strip()
     joined = measures.merge(pm.drop(columns=["Key"]), on="_k", how="left")
     unmapped = joined[joined["GFIW lvl 1"].isna()]
+    log.info("ADW: PROD mapping join: %s matched, %s unmatched",
+             len(joined) - len(unmapped), len(unmapped))
     if len(unmapped):
         log.warning("ADW: %s rows with unmapped Measure (examples: %s) — dropped as in Alteryx",
                     len(unmapped), sorted(unmapped["Measure"].unique())[:10])
@@ -220,7 +222,8 @@ def build_adw_branch(us_client_ids: pd.Series) -> pd.DataFrame:
     # semi-join with the US client list (join 534)
     before = len(adw)
     adw = adw[adw["Relation_ID"].isin(set(us_client_ids))]
-    log.info("ADW: %s -> %s rows after restricting to US clients", before, len(adw))
+    log.info("ADW: US client semi-join: %s matched, %s unmatched (dropped)",
+             len(adw), before - len(adw))
     return adw
 
 
@@ -255,7 +258,9 @@ def build_qv() -> tuple[pd.DataFrame, pd.Series]:
 # ==================================================== Manual Adjustments branch
 def build_manual_adjustments() -> pd.DataFrame:
     df = cleanse(read_input("manual_adjustments"))
+    before = len(df)
     df = df[df[col(df, "ACCOUNT_IDENT")].str.contains("HH", na=False)]
+    log.info("Manual Adjustments: HH filter: %s kept, %s dropped", len(df), before - len(df))
     out = pd.DataFrame({
         "Year": df[col(df, "YEAR")],
         "Period": df[col(df, "PERIOD")],
@@ -281,7 +286,9 @@ def build_manual_adjustments() -> pd.DataFrame:
 def build_banker_portal(masterlist_uhnw: pd.DataFrame, masterlist_ids: pd.Series) -> pd.DataFrame:
     bp = cleanse(read_input("bp_source"))
     rev = col(bp, "Gross Revenue (Post RMP - USD)")
+    before = len(bp)
     bp = bp[to_num(bp[rev]).fillna(0) != 0].copy()
+    log.info("Banker Portal: zero-revenue filter: %s kept, %s dropped", len(bp), before - len(bp))
 
     bp["Key"] = bp[col(bp, "One Bank Product")].fillna("") + bp[col(bp, "Dashboard Product")].fillna("")
     bp["Sub Account"] = bp[col(bp, "Parent CMIS ID")]
@@ -301,12 +308,18 @@ def build_banker_portal(masterlist_uhnw: pd.DataFrame, masterlist_ids: pd.Series
     meta = meta.rename(columns={col(meta, "BP Product key"): "Key"})
     keep = ["Key"] + [col(meta, f"GFIW lvl{i}") for i in range(1, 5)]
     meta = meta[keep].drop_duplicates(subset="Key")
+    before = len(bp)
     bp = bp.merge(meta, on="Key", how="inner")
+    log.info("Banker Portal: GFIW metadata join on Key: %s matched, %s unmatched (dropped)",
+             len(bp), before - len(bp))
     bp = bp.rename(columns={col(bp, "Parent CMIS ID"): "Master Account"}).drop(columns=["Key"])
 
     # only clients from the UHNW US masterlist (join 572)
     conn = col(masterlist_uhnw, "CONNECTOR_ID#")
+    before = len(bp)
     bp = bp[bp["Master Account"].isin(set(masterlist_uhnw[conn]))]
+    log.info("Banker Portal: UHNW masterlist semi-join: %s matched, %s unmatched (dropped)",
+             len(bp), before - len(bp))
 
     # accounts outside the monthly masterlist -> Relation_ID from Accounts_Relation (join 570)
     acc = cleanse(read_input("accounts_relation"))
@@ -315,8 +328,8 @@ def build_banker_portal(masterlist_uhnw: pd.DataFrame, masterlist_ids: pd.Series
     before = len(bp)
     bp = bp.merge(acc_outside[[acc_id, rel_id]].drop_duplicates(subset=acc_id),
                   left_on="Master Account", right_on=acc_id, how="inner")
-    log.info("Banker Portal: %s -> %s rows after matching to Accounts_Relation "
-             "(dropped rows go to a control Browse in Alteryx)", before, len(bp))
+    log.info("Banker Portal: Accounts_Relation join: %s matched, %s unmatched "
+             "(dropped rows go to a control Browse in Alteryx)", len(bp), before - len(bp))
     bp = bp.rename(columns={rel_id: "Relation_ID"}).drop(columns=[acc_id])
     bp = bp.rename(columns={col(bp, "GFIW lvl1"): "GFIW lvl 1",
                             col(bp, "GFIW lvl2"): "GFIW lvl 2",
@@ -338,7 +351,10 @@ def build_dig(masterlist_uhnw_all: pd.DataFrame) -> pd.DataFrame:
     ml = masterlist_uhnw_all
     ml_client = col(ml, "CLIENT_ID")
 
+    before = len(dig)
     dig = dig[dig[col(dig, "CLIENT_ID")].isin(set(ml[ml_client]))].copy()
+    log.info("DIG: UHNW masterlist semi-join on CLIENT_ID: %s matched, %s unmatched (dropped)",
+             len(dig), before - len(dig))
     date_closed = dig[col(dig, "Date Closed")].astype(str)
     dig["Year"] = date_closed.str[:4]
     dig["Period"] = dig["Year"] + date_closed.str[5:7]
@@ -360,15 +376,29 @@ def build_dig(masterlist_uhnw_all: pd.DataFrame) -> pd.DataFrame:
 
     # unmatched -> via HOUSEHOLD_ID from the masterlist
     unmatched = dig[~dig["CLIENT_ID"].isin(rs_ids)].copy()
+    log.info("DIG: Relation Structure direct match: %s matched, %s unmatched (retry via household)",
+             len(matched), len(unmatched))
     if len(unmatched):
         hh_map = ml[[ml_client, col(ml, "HOUSEHOLD_ID")]].copy()
         hh_map.columns = ["CLIENT_ID", "HOUSEHOLD_ID"]
+        before = len(unmatched)
         unmatched = unmatched.merge(hh_map, on="CLIENT_ID", how="inner")
+        log.info("DIG: household lookup in masterlist: %s matched, %s unmatched (dropped)",
+                 len(unmatched), before - len(unmatched))
         unmatched["HOUSEHOLD_ID"] = "HH" + unmatched["HOUSEHOLD_ID"].astype(str)
+        before = len(unmatched)
         unmatched = unmatched[unmatched["HOUSEHOLD_ID"].isin(rs_ids)]
+        log.info("DIG: household match to Relation Structure: %s matched, %s unmatched (dropped)",
+                 len(unmatched), before - len(unmatched))
         unmatched = (unmatched.groupby(["CLIENT_ID", "Year", "Period", "Value",
                                         "Opportunity Code", "Investor Name"], as_index=False)
                               .agg(Relation_ID=("HOUSEHOLD_ID", "first")))
+        # Alteryx Summarize 589: collapse clients of the same household to one row
+        before = len(unmatched)
+        unmatched = unmatched.drop(columns=["CLIENT_ID"]).drop_duplicates(
+            subset=["Relation_ID", "Year", "Period", "Value",
+                    "Opportunity Code", "Investor Name"])
+        log.info("DIG: household dedup (Summarize 589): %s -> %s rows", before, len(unmatched))
         unmatched["CLIENT_ID"] = unmatched["Relation_ID"]
     dig_all = pd.concat([matched, unmatched], ignore_index=True).drop(columns=["Investor Name"])
     log.info("DIG: %s rows (matched %s, via household %s)",
@@ -420,7 +450,8 @@ def main() -> None:
         build_adw_branch(us_client_ids),
         build_manual_adjustments(),
         build_banker_portal(ml_uhnw, ml_month_ids),
-        build_dig(ml_uhnw),
+        # DIG joins use the raw UHNW US.xlsx (tool 571), not the UHNW-filtered list
+        build_dig(ml_uhnw_all),
     ]
     fin = pd.concat(branches, ignore_index=True)
     log.info("FIN: %s rows after branch union", len(fin))
