@@ -151,19 +151,27 @@ def build_dac(cfg: Config, base: pd.DataFrame) -> pd.DataFrame:
     flags = pd.DataFrame({c: pd.to_numeric(dac[col(dac, c)], errors="coerce")
                           for c in DAC_FLAG_COLUMNS if _has_col(dac, c)})
     dac["DAC_FLAG"] = (flags == 1).any(axis=1).map({True: "Y", False: "N"})
+    matched_mask = dac[col(dac, "Global Partner ID 1")].isin(set(base["PARTNER_ID_1"]))
     joined = dac.merge(base, left_on=col(dac, "Global Partner ID 1"),
                        right_on="PARTNER_ID_1", how="inner")
+    log.info("DAC: base join on Global Partner ID 1: %s matched, %s unmatched (dropped)",
+             int(matched_mask.sum()), int((~matched_mask).sum()))
     fit = (joined.groupby("Relation_ID", as_index=False)["DAC_FLAG"].max()
                  .rename(columns={"DAC_FLAG": "FIT_ISIN_DAC"}))
     log.info("DAC file branch: %s relations", len(fit))
 
     # --- GMIS mandate branch (nodes 2736..2742): DAC coverage-cluster mandates
     gmis = read_input(cfg, "gmis_mandates")
+    before = len(gmis)
     gmis = gmis[gmis[col(gmis, "Mand. Type ID")].isin(DAC_MANDATE_IDS)].copy()
+    log.info("DAC: GMIS mandate-type filter: %s kept, %s dropped", len(gmis), before - len(gmis))
     gmis["Mandate_DAC"] = "Y"
+    matched_mask = gmis[col(gmis, "ID 1 (Account)")].isin(set(base["PARTNER_ID_1"]))
     gjoin = base.merge(gmis[[col(gmis, "ID 1 (Account)"), "Mandate_DAC"]],
                        left_on="PARTNER_ID_1", right_on=col(gmis, "ID 1 (Account)"),
                        how="inner")
+    log.info("DAC: GMIS base join on ID 1 (Account): %s matched, %s unmatched (dropped)",
+             int(matched_mask.sum()), int((~matched_mask).sum()))
     mand = gjoin.groupby("Relation_ID", as_index=False)["Mandate_DAC"].max()
     log.info("DAC mandate branch: %s relations", len(mand))
 
@@ -188,11 +196,16 @@ def build_pma_ch(cfg: Config, base: pd.DataFrame) -> pd.DataFrame:
     """H1_PMA_CH documents -> PMS/CMS/RS/PMA_STATUS + PCS/schedule flags."""
     ch = read_input(cfg, "pma_ch")
     ch["Partner_ID_1"] = "3032-" + ch[col(ch, "Business Relation")]
+    matched_mask = ch["Partner_ID_1"].isin(set(base["PARTNER_ID_1"]))
     ch = ch.merge(base, left_on="Partner_ID_1", right_on="PARTNER_ID_1", how="inner")
+    log.info("PMA CH: base join on Partner_ID_1: %s matched, %s unmatched (dropped)",
+             int(matched_mask.sum()), int((~matched_mask).sum()))
 
     cdok = col(ch, "CDOK")
     status = col(ch, "Status")
+    before = len(ch)
     ch = ch[ch[cdok].isin(PMA_CDOK) & ch[status].isin(PMA_STATUSES)]
+    log.info("PMA CH: CDOK/status filter: %s kept, %s dropped", len(ch), before - len(ch))
 
     # dedup + cross tab: one column per CDOK, documents concatenated (nodes 242/236)
     dedup = ch[["Relation_ID", cdok, col(ch, "Document")]].drop_duplicates()
@@ -236,7 +249,9 @@ def build_pma_ch(cfg: Config, base: pd.DataFrame) -> pd.DataFrame:
 def build_pma_apac(cfg: Config) -> pd.DataFrame:
     """H1 - PMA_Mandates_APAC -> PMA Capital Market Schedule = Y (Bc 4005/4006)."""
     ap = read_input(cfg, "pma_apac")
+    before = len(ap)
     ap = ap[ap[col(ap, "Bc")].isin(["4005", "4006"])].copy()
+    log.info("PMA APAC: Bc 4005/4006 filter: %s kept, %s dropped", len(ap), before - len(ap))
     ap["Onboarding Solutions - PMA Capital Market Schedule"] = "Y"
     out = (ap.groupby(col(ap, "R Identifier"), as_index=False)
              ["Onboarding Solutions - PMA Capital Market Schedule"].max())
