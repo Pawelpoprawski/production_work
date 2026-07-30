@@ -3,46 +3,31 @@ category: GWM Figures
 status: ready
 owner: Pawel Poprawski
 description: >
-  Load GMIS to DB — consolidates ~100 GMIS export files (txt, ~1M rows each)
-  into the raw GWM database plus per-account groupings, and reconciles the
-  totals against the "GWM Grouped for Check" file downloaded from GMIS.
+  Step 3 of the GMIS chain — consolidates ~100 GMIS export files (txt,
+  ~1M rows each) filtered to the GMIS Account Universe into the raw GWM
+  database plus per-account groupings.
 instructions: |
   ## How to run
-  1. Put the GMIS export files (`*.txt`) in the `GMIS DATA\All` folder and
-     the grouped download in `GMIS DATA\GWM Grouped for Check.txt`.
-  2. Click **Start** — files are processed one by one (streaming), progress
-     is shown in the live log.
+  1. Run **GMIS Quick Check** first (reconciliation vs the grouped download)
+     and **GMIS Account Filter** (builds the Account Universe list).
+  2. Put the GMIS export files (`*.txt`) in the `GMIS DATA\All` folder.
+  3. Click **Start** — files are processed one by one (streaming); each chunk
+     is filtered to the Account Universe right after reading, before any
+     cleaning, so only relevant rows are processed.
 
   ## Outputs (pipe-delimited CSV)
-  * `0. GWM RAW GMIS.csv` — consolidated raw GMIS data (deduplicated)
+  * `0. GWM RAW GMIS Universe.csv` — raw GMIS data for the Account Universe
   * `temps/Current GMIS grouping.csv` — unique grouping per account/month
   * `temps/Brokerage per account.csv` — rows with Brokerage revenue sub type
   * `temps/GMIS Mandates per account.csv` — mandate hierarchy per account (IA >= 1)
-  * `Compare1.csv` / `Compare2.csv` — reconciliation vs the grouped check file
 
-  ## Check
-  After the run the page shows a green check when the consolidated totals
-  match the "GWM Grouped for Check" file, or a warning with the differences.
+  ## Notes
+  * No deduplication — a green GMIS Quick Check already proves the input
+    files contain no duplicates.
+  * The grouped-check comparison lives in GMIS Quick Check (comparing a
+    filtered subset with the full-population download would always differ).
 params:
   - key: period
     label: Period (YYYYMM)
     type: period
     help: Informational — GMIS paths do not depend on the period.
-  - key: filter_accounts
-    label: Filter to Account Universe
-    type: checkbox
-    default: true
-    help: >
-      Keep only accounts from the GMIS Account Universe list (built by the
-      "GMIS Account Filter" workflow) BEFORE cleaning — much faster, and the
-      RAW output becomes "0. GWM RAW GMIS Universe.csv". The grouped check
-      comparison is skipped (it only makes sense on the full population —
-      use Quick total check for that).
-  - key: dedup
-    label: Deduplicate across files
-    type: checkbox
-    default: false
-    help: >
-      Global Unique across all files, like in Alteryx. Usually unnecessary —
-      a green Quick total check already proves there are no duplicates.
-      Slows the run down considerably towards the end.
