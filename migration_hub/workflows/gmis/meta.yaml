@@ -28,3 +28,12 @@ params:
     label: Period (YYYYMM)
     type: period
     help: Informational — GMIS paths do not depend on the period.
+  - key: quick_check
+    label: Quick total check only
+    type: checkbox
+    default: false
+    help: >
+      Fast mode — reads only Year + the 22 measures from each file, sums them
+      per Year and compares against GWM Grouped for Check. No deduplication,
+      no RAW/per-account outputs. Duplicated rows across files (if any) WILL
+      inflate the totals compared to the full run.
