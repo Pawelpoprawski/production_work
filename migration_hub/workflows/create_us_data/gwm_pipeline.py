@@ -29,6 +29,16 @@ import config as cfg
 
 log = logging.getLogger("gwm_us")
 
+try:
+    from core.export import write_csv_batched
+except ImportError:  # standalone run outside the hub
+    def write_csv_batched(df, path, *, sep=",", encoding="utf-8",
+                          lineterminator="\r\n", index=False,
+                          label=None, logger=None):
+        df.to_csv(path, sep=sep, index=index, encoding=encoding,
+                  lineterminator=lineterminator)
+        (logger or log).info("Saved %s (%s rows)", path, len(df))
+
 # checks collected during the run, shown by the hub UI (green/warning)
 CHECKS: list[dict] = []
 
@@ -453,9 +463,8 @@ def main() -> dict:
 
     # QV (US client list) — also needed as a filter for ADW
     qv, us_client_ids = build_qv()
-    qv.to_csv(cfg.OUT_QV_CSV, sep=cfg.CSV_SEP, index=False,
-              encoding=cfg.CSV_ENCODING, lineterminator="\r\n")
-    log.info("Saved %s (%s rows)", cfg.OUT_QV_CSV, len(qv))
+    write_csv_batched(qv, cfg.OUT_QV_CSV, sep=cfg.CSV_SEP,
+                      encoding=cfg.CSV_ENCODING, logger=log)
 
     # masterlists used by BP and DIG
     ml_uhnw_all = cleanse(read_input("uhnw_us"))
@@ -479,16 +488,14 @@ def main() -> dict:
     log.info("FIN: Year filter in %s: %s -> %s rows", cfg.YEARS_KEPT, before, len(fin))
 
     fin.insert(0, "Timestamp", datetime.now().strftime("%Y-%m-%d"))
-    fin.to_csv(cfg.OUT_FIN_CSV, sep=cfg.CSV_SEP, index=False,
-               encoding=cfg.CSV_ENCODING, lineterminator="\r\n")
-    log.info("Saved %s (%s rows)", cfg.OUT_FIN_CSV, len(fin))
+    write_csv_batched(fin, cfg.OUT_FIN_CSV, sep=cfg.CSV_SEP,
+                      encoding=cfg.CSV_ENCODING, logger=log)
 
     # control: Value sums by GFIW lvl 1/2 x Period (the Alteryx CrossTab)
     control = (fin.groupby(["GFIW lvl 1", "GFIW lvl 2", "Period"])["Value"]
                   .sum().unstack("Period").reset_index())
-    control.to_csv(cfg.OUT_CONTROL_CSV, sep=cfg.CSV_SEP, index=False,
-                   encoding=cfg.CSV_ENCODING, lineterminator="\r\n")
-    log.info("Saved control file %s", cfg.OUT_CONTROL_CSV)
+    write_csv_batched(control, cfg.OUT_CONTROL_CSV, sep=cfg.CSV_SEP,
+                      encoding=cfg.CSV_ENCODING, logger=log)
 
     log.info("Value summary by Source:\n%s",
              fin.groupby("Source")["Value"].agg(["count", "sum"]).to_string())

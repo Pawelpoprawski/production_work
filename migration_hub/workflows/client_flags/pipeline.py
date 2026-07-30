@@ -28,6 +28,16 @@ log = logging.getLogger("client_flags")
 CSV_SEP = "|"
 CSV_ENCODING = "utf-8-sig"
 
+try:
+    from core.export import write_csv_batched
+except ImportError:  # standalone run outside the hub
+    def write_csv_batched(df, path, *, sep=",", encoding="utf-8",
+                          lineterminator="\r\n", index=False,
+                          label=None, logger=None):
+        df.to_csv(path, sep=sep, index=index, encoding=encoding,
+                  lineterminator=lineterminator)
+        (logger or log).info("Saved %s (%s rows)", path, len(df))
+
 # the 11 Direct-Access flag columns from the DAC Clients file (Formula 3)
 DAC_FLAG_COLUMNS = [
     "204 Direct Access Suitability FX Flag",
@@ -299,8 +309,7 @@ def run(params: dict, progress=print) -> dict:
     flags = flags[[c for c in order if c in flags.columns]]
 
     cfg.output.parent.mkdir(parents=True, exist_ok=True)
-    flags.to_csv(cfg.output, sep=CSV_SEP, index=False,
-                 encoding=CSV_ENCODING, lineterminator="\r\n")
-    log.info("Saved %s (%s rows)", cfg.output, len(flags))
+    write_csv_batched(flags, cfg.output, sep=CSV_SEP,
+                      encoding=CSV_ENCODING, logger=log)
     log.info("=== DONE — OK ===")
     return {"outputs": [str(cfg.output)]}
