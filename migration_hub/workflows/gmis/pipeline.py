@@ -250,12 +250,18 @@ def run(params: dict, progress=print) -> dict:
                     / max(len(sample), 1), 1)
                 est_total = max(int(path.stat().st_size / bytes_per_row),
                                 len(chunk))
+            step = time.monotonic()
             chunk = clean_chunk(chunk)[ALL_COLS]
+            clean_s = time.monotonic() - step
 
             # global Unique (23): drop rows already seen in ANY file
+            step = time.monotonic()
             hashes = pd.util.hash_pandas_object(chunk, index=False).to_numpy()
+            hash_s = time.monotonic() - step
+            step = time.monotonic()
             mask = seen.filter_new(hashes)
             chunk = chunk[mask]
+            dedup_s = time.monotonic() - step
             file_kept += len(chunk)
             if not len(chunk):
                 log.info("  [%s] chunk %s fully duplicated — ~%s%%, %s rows "
@@ -265,11 +271,14 @@ def run(params: dict, progress=print) -> dict:
                 continue
 
             chunk["FileName"] = path.name
+            step = time.monotonic()
             append_csv(chunk, cfg.outputs["raw"], raw_first)
+            write_s = time.monotonic() - step
             raw_first = False
             raw_rows += len(chunk)
 
             # (27) unique grouping per account/month
+            step = time.monotonic()
             grouping_parts.append(chunk[["Synthetic Grouping ID (latest)", "R_ID",
                                          "ID 1 (Account)", "Month (YYYYMM)"]]
                                   .drop_duplicates())
@@ -296,6 +305,7 @@ def run(params: dict, progress=print) -> dict:
             consolidated_parts.append(
                 chunk.groupby(HIER_COLS + ["Year (YYYY)"], as_index=False)
                      [MEASURE_COLS].sum())
+            agg_s = time.monotonic() - step
 
             pct = min(file_rows * 100 // est_total, 99)
             chunk_s = time.monotonic() - chunk_start
@@ -305,6 +315,11 @@ def run(params: dict, progress=print) -> dict:
             log.info("  [%s] chunk %s done in %.1f s (%s rows/s) — file ~%s%%, "
                      "ETA for this file ~%.0f s | %s rows in RAW so far",
                      path.name, chunk_no, chunk_s, f"{rate:,}", pct, eta_s, raw_rows)
+            log.info("  [%s] chunk %s steps: read %.1f s | clean %.1f s | "
+                     "hash %.1f s | dedup %.1f s (%s hashes seen) | "
+                     "write RAW %.1f s | aggregates %.1f s",
+                     path.name, chunk_no, read_s, clean_s, hash_s, dedup_s,
+                     f"{len(seen):,}", write_s, agg_s)
             chunk_start = time.monotonic()
 
         file_s = time.monotonic() - file_start
