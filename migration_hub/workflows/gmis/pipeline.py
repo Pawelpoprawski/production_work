@@ -339,8 +339,8 @@ def run(params: dict, progress=print) -> dict:
         uni = pd.read_csv(uni_path, sep=CSV_SEP, dtype=str, encoding="utf-8-sig")
         universe = set(uni[col(uni, "Account")].astype(str).str.strip())
         raw_key = "raw_universe"
-        log.info("Account Universe loaded: %s accounts (%s)",
-                 f"{len(universe):,}", uni_path.name)
+        log.info("Account Universe loaded: %s accounts (%s), examples: %s",
+                 f"{len(universe):,}", uni_path.name, sorted(universe)[:5])
 
     src_dir = Path(cfg.inputs["gmis_files_dir"])
     files = sorted(p for p in src_dir.glob("*.txt")
@@ -393,8 +393,27 @@ def run(params: dict, progress=print) -> dict:
             acct_dropped = 0
             if universe is not None:
                 acct_col = col(chunk, "ID 1 (Account)")
-                acct_mask = chunk[acct_col].astype(str).str.strip().isin(universe)
+                accts = chunk[acct_col].astype(str).str.strip()
+                acct_mask = accts.isin(universe)
                 acct_dropped = int((~acct_mask).sum())
+                if chunk_no == 1:  # per-file diagnostics on the first chunk
+                    uniq_accts = accts.drop_duplicates()
+                    in_uni = uniq_accts.isin(universe)
+                    log.info("  [%s] account diagnostics: %s unique accounts in "
+                             "chunk, %s in universe, %s outside | in-file "
+                             "examples: %s | outside examples: %s",
+                             path.name, len(uniq_accts), int(in_uni.sum()),
+                             int((~in_uni).sum()), uniq_accts.head(3).tolist(),
+                             uniq_accts[~in_uni].head(3).tolist())
+                    if not in_uni.any():
+                        log.warning("  [%s] NO chunk account matches the "
+                                    "universe — likely an ID format mismatch "
+                                    "(check the examples above)", path.name)
+                    elif in_uni.all():
+                        log.warning("  [%s] EVERY chunk account is in the "
+                                    "universe — the filter drops nothing; "
+                                    "verify the universe list is not too broad",
+                                    path.name)
                 chunk = chunk[acct_mask]
             filt_s = time.monotonic() - step
             if not len(chunk):
