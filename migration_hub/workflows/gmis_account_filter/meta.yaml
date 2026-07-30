@@ -1,0 +1,30 @@
+name: GMIS Account Filter
+category: GWM Figures
+status: ready
+owner: Pawel Poprawski
+description: >
+  Builds the GMIS Account Universe — the list of accounts we care about —
+  from EVC coverage, HEC, Relation Structure (GFIW sector flag), 2655 Relation
+  Replacement (financial thresholds), the period Masterlist and the Custom PnL
+  export. The GMIS workflow uses this list to filter the raw GMIS files.
+instructions: |
+  ## How to run
+  1. Pick the reporting period (YYYYMM) — it selects the
+     `<PERIOD>_Masterlist_UHNW_GFIW.xlsx` file.
+  2. Click **Start**.
+
+  ## Logic (from the Alteryx filter workflow)
+  * Relations: EVC coverage + HEC + Relation Structure (`GFIW_SECTOR_FLAG = Y`)
+    + 2655 Relation Replacement (`IA_MTD >= 49M` or `NET_REVENUE_DECYTD_T_1 >
+    200k` or annualised `NET_REVENUE_YTD > 200k`)
+  * Relations -> GMIS accounts via Accounts_Relation (`ACCOUNT_TYPE = GMIS`)
+  * Plus accounts straight from the Masterlist (`CONN_ID_TYPE#` contains GMIS)
+    and from `CUSTOM_PnL_Export.xlsx`
+
+  ## Output
+  * `GMIS Account Universe.csv` — one column `Account`, unique list
+params:
+  - key: period
+    label: Period (YYYYMM)
+    type: period
+    help: Selects the <YEAR>/<PERIOD>_Masterlist_UHNW_GFIW.xlsx input file.

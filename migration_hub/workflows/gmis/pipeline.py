@@ -101,16 +101,20 @@ class Config:
         gmis_data = gfo / "005_Projects" / "004_Python" / "GMIS DATA"
         database = gfo / "005_Projects" / "004_Python" / "Alteryx" / "Database"
 
-        self.inputs = {
-            "gmis_files_dir": gmis_data / "All",
-            "grouped_check": gmis_data / "GWM Grouped for Check.txt",
-        }
-
         out_env = os.environ.get("UBS_OUTPUT_DIR")
         out_db = Path(out_env) if out_env else database
         out_cmp = Path(out_env) if out_env else gmis_data
+
+        self.inputs = {
+            "gmis_files_dir": gmis_data / "All",
+            "grouped_check": gmis_data / "GWM Grouped for Check.txt",
+            # built by the "GMIS Account Filter" workflow
+            "account_universe": out_db / "GMIS Account Universe.csv",
+        }
+
         self.outputs = {
             "raw": out_db / "0. GWM RAW GMIS.csv",
+            "raw_universe": out_db / "0. GWM RAW GMIS Universe.csv",
             "grouping": out_db / "temps" / "Current GMIS grouping.csv",
             "brokerage": out_db / "temps" / "Brokerage per account.csv",
             "mandates": out_db / "temps" / "GMIS Mandates per account.csv",
@@ -308,11 +312,35 @@ def run_quick_check(cfg: Config) -> dict:
 # ---------------------------------------------------------------- main
 def run(params: dict, progress=print) -> dict:
     cfg = Config()
-    if str(params.get("quick_check", "")).lower() in ("true", "1", "yes"):
+
+    def flag(key: str, default: bool = False) -> bool:
+        v = params.get(key, default)
+        return str(v).lower() in ("true", "1", "yes")
+
+    if flag("quick_check"):
         log.info("=== GMIS: QUICK TOTAL CHECK ===")
         return run_quick_check(cfg)
+
+    filter_accounts = flag("filter_accounts", True)
+    do_dedup = flag("dedup", False)
     checks: list[dict] = []
-    log.info("=== GMIS: LOAD GMIS TO DB ===")
+    log.info("=== GMIS: LOAD GMIS TO DB (account filter: %s, dedup: %s) ===",
+             "ON" if filter_accounts else "OFF", "ON" if do_dedup else "OFF")
+
+    universe: set | None = None
+    raw_key = "raw"
+    if filter_accounts:
+        uni_path = Path(cfg.inputs["account_universe"])
+        if not uni_path.exists():
+            raise FileNotFoundError(
+                f"Missing account universe file: {uni_path} — run the "
+                f"'GMIS Account Filter' workflow first (or untick "
+                f"'Filter to Account Universe').")
+        uni = pd.read_csv(uni_path, sep=CSV_SEP, dtype=str, encoding="utf-8-sig")
+        universe = set(uni[col(uni, "Account")].astype(str).str.strip())
+        raw_key = "raw_universe"
+        log.info("Account Universe loaded: %s accounts (%s)",
+                 f"{len(universe):,}", uni_path.name)
 
     src_dir = Path(cfg.inputs["gmis_files_dir"])
     files = sorted(p for p in src_dir.glob("*.txt")
@@ -360,18 +388,36 @@ def run(params: dict, progress=print) -> dict:
                     / max(len(sample), 1), 1)
                 est_total = max(int(path.stat().st_size / bytes_per_row),
                                 len(chunk))
+            # account filter BEFORE cleaning — cheap isin on the raw strings
+            step = time.monotonic()
+            acct_dropped = 0
+            if universe is not None:
+                acct_col = col(chunk, "ID 1 (Account)")
+                acct_mask = chunk[acct_col].astype(str).str.strip().isin(universe)
+                acct_dropped = int((~acct_mask).sum())
+                chunk = chunk[acct_mask]
+            filt_s = time.monotonic() - step
+            if not len(chunk):
+                log.info("  [%s] chunk %s: no universe accounts (%s rows "
+                         "dropped) — ~%s%%", path.name, chunk_no, acct_dropped,
+                         min(file_rows * 100 // est_total, 99))
+                chunk_start = time.monotonic()
+                continue
+
             step = time.monotonic()
             chunk = clean_chunk(chunk)[ALL_COLS]
             clean_s = time.monotonic() - step
 
-            # global Unique (23): drop rows already seen in ANY file
-            step = time.monotonic()
-            hashes = pd.util.hash_pandas_object(chunk, index=False).to_numpy()
-            hash_s = time.monotonic() - step
-            step = time.monotonic()
-            mask = seen.filter_new(hashes)
-            chunk = chunk[mask]
-            dedup_s = time.monotonic() - step
+            # global Unique (23): drop rows already seen in ANY file (optional)
+            hash_s = dedup_s = 0.0
+            if do_dedup:
+                step = time.monotonic()
+                hashes = pd.util.hash_pandas_object(chunk, index=False).to_numpy()
+                hash_s = time.monotonic() - step
+                step = time.monotonic()
+                mask = seen.filter_new(hashes)
+                chunk = chunk[mask]
+                dedup_s = time.monotonic() - step
             file_kept += len(chunk)
             if not len(chunk):
                 log.info("  [%s] chunk %s fully duplicated — ~%s%%, %s rows "
@@ -382,7 +428,7 @@ def run(params: dict, progress=print) -> dict:
 
             chunk["FileName"] = path.name
             step = time.monotonic()
-            append_csv(chunk, cfg.outputs["raw"], raw_first)
+            append_csv(chunk, cfg.outputs[raw_key], raw_first)
             write_s = time.monotonic() - step
             raw_first = False
             raw_rows += len(chunk)
@@ -425,23 +471,23 @@ def run(params: dict, progress=print) -> dict:
             log.info("  [%s] chunk %s done in %.1f s (%s rows/s) — file ~%s%%, "
                      "ETA for this file ~%.0f s | %s rows in RAW so far",
                      path.name, chunk_no, chunk_s, f"{rate:,}", pct, eta_s, raw_rows)
-            log.info("  [%s] chunk %s steps: read %.1f s | clean %.1f s | "
-                     "hash %.1f s | dedup %.1f s (%s hashes seen) | "
-                     "write RAW %.1f s | aggregates %.1f s",
-                     path.name, chunk_no, read_s, clean_s, hash_s, dedup_s,
-                     f"{len(seen):,}", write_s, agg_s)
+            log.info("  [%s] chunk %s steps: read %.1f s | acct filter %.1f s "
+                     "(%s dropped) | clean %.1f s | hash %.1f s | dedup %.1f s "
+                     "(%s hashes seen) | write RAW %.1f s | aggregates %.1f s",
+                     path.name, chunk_no, read_s, filt_s, acct_dropped, clean_s,
+                     hash_s, dedup_s, f"{len(seen):,}", write_s, agg_s)
             chunk_start = time.monotonic()
 
         file_s = time.monotonic() - file_start
         done_s = time.monotonic() - run_start
         eta_all = (len(files) - i) * done_s / i
         log.info("File %s/%s done in %.0f s: %s — %s rows read, %s kept, %s "
-                 "dropped as duplicates (global Unique) | overall ETA ~%.0f min",
+                 "dropped (account filter + duplicates) | overall ETA ~%.0f min",
                  i, len(files), file_s, path.name, file_rows, file_kept,
                  file_rows - file_kept, eta_all / 60)
 
-    log.info("RAW: %s unique rows written to %s (from %s files)",
-             raw_rows, cfg.outputs["raw"], len(files))
+    log.info("RAW: %s rows written to %s (from %s files)",
+             raw_rows, cfg.outputs[raw_key], len(files))
 
     # ------------------------------------------------ (27) grouping output
     grouping = pd.concat(grouping_parts, ignore_index=True).drop_duplicates()
@@ -468,6 +514,26 @@ def run(params: dict, progress=print) -> dict:
                     .groupby(HIER_COLS + ["Year (YYYY)"], as_index=False)
                     [MEASURE_COLS].sum())
     consolidated["File"] = "Consolidated"
+
+    if filter_accounts:
+        # comparing a filtered subset with the full-population check file
+        # would always mismatch — the reconciliation lives in Quick Check
+        log.info("Grouped check SKIPPED — account-filtered run (universe only). "
+                 "Use the GMIS Quick Check workflow for reconciliation.")
+        checks.append({"name": "Grouped check", "status": "ok",
+                       "message": "Grouped check skipped (account-filtered run) "
+                                  "— reconcile the full population with GMIS "
+                                  "Quick Check"})
+        summary = (consolidated.groupby("Year (YYYY)", as_index=False)
+                   [MEASURE_COLS].sum().round(2))
+        log.info("Universe totals per Year:\n%s",
+                 summary.to_string(index=False, max_colwidth=30))
+        log.info("=== DONE — OK ===")
+        outputs = [str(cfg.outputs[raw_key]), str(cfg.outputs["grouping"]),
+                   str(cfg.outputs["brokerage"]), str(cfg.outputs["mandates"])]
+        return {"outputs": outputs, "checks": checks,
+                "summary_title": "Universe totals per Year",
+                "summary": summary.to_dict("records")}
 
     # ------------------------------------------------ (2/16/11/12) check side
     check_path = Path(cfg.inputs["grouped_check"])
@@ -540,7 +606,8 @@ def run(params: dict, progress=print) -> dict:
              summary.to_string(index=False, max_colwidth=30))
     log.info("=== DONE — OK ===")
 
-    return {"outputs": [str(p) for p in cfg.outputs.values()],
+    return {"outputs": [str(p) for k, p in cfg.outputs.items()
+                        if k != "raw_universe"],
             "checks": checks,
             "summary_title": "Totals per File × Year (Compare2)",
             "summary": summary.to_dict("records")}

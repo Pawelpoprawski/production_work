@@ -29,6 +29,9 @@ class Workflow:
     category: str = "Other"
     status: str = "planned"       # planned | in_progress | ready
     params: list[dict] = field(default_factory=list)
+    # extra run buttons: [{key, label, help}] — clicking one calls
+    # run(params | {key: True})
+    actions: list[dict] = field(default_factory=list)
     path: Path = None
 
     @property
@@ -66,6 +69,7 @@ def discover() -> list[Workflow]:
             category=meta.get("category", "Other"),
             status=meta.get("status", "planned"),
             params=meta.get("params", []),
+            actions=meta.get("actions", []),
             path=d,
         ))
     return result

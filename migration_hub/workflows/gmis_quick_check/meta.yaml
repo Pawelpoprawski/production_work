@@ -1,0 +1,27 @@
+name: GMIS Quick Check
+category: GWM Figures
+status: ready
+owner: Pawel Poprawski
+description: >
+  Step 1 of the GMIS chain — fast reconciliation of the ~100 GMIS export
+  files against "GWM Grouped for Check": sums Net rev / Gross rev /
+  Total assets / NNM per Year. No dedup, no outputs beyond the compare file.
+instructions: |
+  ## How to run
+  Click **Start** — each file is read once (only Year + 4 key measures),
+  summed per Year and compared with `GWM Grouped for Check.txt`.
+
+  ## Result
+  * Green check — single files add up to the grouped download: no missing
+    files and no duplicates. You can safely run the full GMIS workflow
+    without deduplication.
+  * Warning — totals differ: a file is missing/doubled or the grouped
+    download is stale. The differences table shows Year × Measure.
+
+  ## Output
+  * `Quick total check.csv` — totals per File × Year
+params:
+  - key: period
+    label: Period (YYYYMM)
+    type: period
+    help: Informational — GMIS paths do not depend on the period.

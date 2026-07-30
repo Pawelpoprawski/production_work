@@ -269,7 +269,21 @@ def workflow_page(wf: Workflow) -> None:
     if not inputs_ok:
         st.caption("⚠️ You can still start the run, but the pipeline will "
                    "most likely fail on the missing file.")
-    if st.button("▶ Start", type="primary"):
+
+    # main Start + extra action buttons defined in meta.yaml (actions:)
+    clicked_action = None
+    btn_cols = st.columns(max(len(wf.actions) + 1, 4))
+    with btn_cols[0]:
+        start_clicked = st.button("▶ Start", type="primary")
+    for i, action in enumerate(wf.actions, 1):
+        with btn_cols[i]:
+            if st.button(action.get("label", action["key"]),
+                         help=action.get("help"), key=f"act_{wf.key}_{action['key']}"):
+                clicked_action = action["key"]
+
+    if start_clicked or clicked_action:
+        if clicked_action:
+            params = dict(params) | {clicked_action: True}
         log_box = st.status("Running…", expanded=True)
 
         def progress(msg: str) -> None:
