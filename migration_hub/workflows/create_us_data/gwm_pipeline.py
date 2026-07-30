@@ -29,6 +29,9 @@ import config as cfg
 
 log = logging.getLogger("gwm_us")
 
+# checks collected during the run, shown by the hub UI (green/warning)
+CHECKS: list[dict] = []
+
 
 # ============================================================== helpers
 def setup_logging() -> None:
@@ -207,6 +210,20 @@ def build_adw_branch(us_client_ids: pd.Series) -> pd.DataFrame:
     if len(unmapped):
         log.warning("ADW: %s rows with unmapped Measure (examples: %s) — dropped as in Alteryx",
                     len(unmapped), sorted(unmapped["Measure"].unique())[:10])
+        missing = (unmapped.groupby("Measure").agg(
+                       Rows=("Measure", "size"), Value_sum=("Value", "sum"))
+                   .round(2).reset_index())
+        CHECKS.append({
+            "name": "PROD mapping", "status": "warning",
+            "message": f"PROD mapping: {len(unmapped)} rows dropped — "
+                       f"{len(missing)} Measure(s) missing from PROD mapping.xlsx",
+            "table": missing.to_dict("records"),
+        })
+    else:
+        CHECKS.append({
+            "name": "PROD mapping", "status": "ok",
+            "message": f"PROD mapping: all {len(joined)} rows matched — no missing mappings",
+        })
     adw = joined[joined["GFIW lvl 1"].notna()].drop(columns=["_k"]).copy()
     adw = adw.rename(columns={"HH": "Relation_ID"})
 
@@ -428,7 +445,8 @@ def build_dig(masterlist_uhnw_all: pd.DataFrame) -> pd.DataFrame:
 
 
 # ==================================================================== main
-def main() -> None:
+def main() -> dict:
+    CHECKS.clear()
     setup_logging()
     log.info("=== GWM Dashboard US, period %s ===", cfg.REPORTING_PERIOD)
     cfg.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -474,7 +492,15 @@ def main() -> None:
 
     log.info("Value summary by Source:\n%s",
              fin.groupby("Source")["Value"].agg(["count", "sum"]).to_string())
+
+    # final control view: Value by GFIW lvl 2 x Period (columns ascending)
+    summary = (fin.groupby(["GFIW lvl 2", "Period"])["Value"].sum()
+                  .unstack("Period").sort_index(axis=1).round(2).reset_index())
+    log.info("Summary by GFIW lvl 2 x Period:\n%s", summary.to_string(index=False))
     log.info("=== DONE — OK ===")
+    return {"checks": list(CHECKS),
+            "summary_title": "Value by GFIW lvl 2 × Period",
+            "summary": summary.to_dict("records")}
 
 
 if __name__ == "__main__":

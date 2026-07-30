@@ -55,7 +55,8 @@ def run(params: dict, progress=print) -> dict:
 
     # logging is configured by the hub runner — disable the local setup
     gwm_pipeline.setup_logging = lambda: None
-    gwm_pipeline.main()
+    result = gwm_pipeline.main() or {}
 
-    return {"outputs": [str(cfg.OUT_FIN_CSV), str(cfg.OUT_QV_CSV),
-                        str(cfg.OUT_CONTROL_CSV)]}
+    result["outputs"] = [str(cfg.OUT_FIN_CSV), str(cfg.OUT_QV_CSV),
+                         str(cfg.OUT_CONTROL_CSV)]
+    return result

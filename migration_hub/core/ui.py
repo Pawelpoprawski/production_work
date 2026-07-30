@@ -280,6 +280,21 @@ def workflow_page(wf: Workflow) -> None:
         if record["status"] == "ok":
             log_box.update(label=f"Finished in {record['duration_s']} s", state="complete")
             result = record.get("result") or {}
+
+            # data-quality checks reported by the pipeline (green/warning)
+            for chk in result.get("checks") or []:
+                if chk.get("status") == "ok":
+                    st.success(chk.get("message", chk.get("name", "OK")))
+                else:
+                    st.warning(chk.get("message", chk.get("name", "Warning")))
+                    if chk.get("table"):
+                        st.dataframe(pd.DataFrame(chk["table"]), hide_index=True)
+
+            # final control summary table
+            if result.get("summary"):
+                st.subheader(result.get("summary_title", "Summary"))
+                st.dataframe(pd.DataFrame(result["summary"]), hide_index=True)
+
             outputs = result.get("outputs", [])
             if outputs:
                 st.subheader("Outputs")
